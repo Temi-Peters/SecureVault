@@ -1,0 +1,22 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio cache and options
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Runtime vault data created when the app actually runs
+# (master password hash, stored entries, lockout state)
+*.dat
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# OS noise
+.DS_Store
+Thumbs.db
