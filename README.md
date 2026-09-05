@@ -20,6 +20,19 @@ Two things to know before running it:
 
 Releases are built automatically by GitHub Actions on a Windows runner from the tagged source, so what you download is exactly what the repository contains at that tag.
 
+### Running on macOS
+
+SecureVault is a Windows application. On Windows you download a release and double-click `SecureVault.exe`, and that is the whole story.
+
+It will also run on macOS through a Windows compatibility layer. This has been tested with Wine, where the application starts and behaves normally, with one catch: double-clicking `SecureVault.exe` in Finder does nothing, because macOS does not recognise a `.exe` file and only the compatibility layer can launch it. Start it from Terminal instead, from the folder the executable is in:
+
+```
+cd ~/Downloads
+wine SecureVault.exe
+```
+
+This was seen with Wine specifically. A different compatibility layer such as CrossOver may handle the double-click differently, so treat the Terminal step as what is confirmed to work rather than the only way. macOS is not a target platform for the project, so nothing here is guaranteed beyond what has been tested.
+
 ## What it does
 
 - Creates a master password on first run, enforcing a minimum policy, and verifies it on every run after that.
