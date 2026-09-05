@@ -1,8 +1,24 @@
 # SecureVault
 
+[![Build](https://github.com/Temi-Peters/SecureVault/actions/workflows/build.yml/badge.svg)](https://github.com/Temi-Peters/SecureVault/actions/workflows/build.yml)
+
 A local, offline password manager built in C# with Windows Forms on .NET 8. It stores website logins in a single encrypted file on the user's own machine, protected by one master password. There is no cloud sync and no account system: everything lives on disk, encrypted, and never leaves the device.
 
 Originally built as A-Level Computer Science coursework (NEA). The full coursework report, including the research, design decisions and testing behind it, is in [`docs/NEA-Report.pdf`](docs/NEA-Report.pdf). A shorter technical write-up of how it works is in [`docs/SecureVault-Technical-Overview.pdf`](docs/SecureVault-Technical-Overview.pdf).
+
+## Download
+
+Windows 10 or 11, 64-bit. Grab the latest build from the [Releases page](https://github.com/Temi-Peters/SecureVault/releases/latest). Two packages are attached to every release:
+
+- **`SecureVault-<version>-win-x64.zip`** includes everything it needs. Unzip it, run `SecureVault.exe`. Larger download.
+- **`SecureVault-<version>-win-x64-framework-dependent.zip`** is much smaller but needs the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) installed first.
+
+Two things to know before running it:
+
+- **Windows SmartScreen will warn you.** The executable is not code-signed, because signing certificates cost money and this is a coursework project. Click "More info", then "Run anyway". The source is all here if you would rather build it yourself.
+- **Unzip it somewhere you can write to**, such as your Documents folder. The vault files are created next to the executable, so it will not work correctly from a read-only location like `Program Files`.
+
+Releases are built automatically by GitHub Actions on a Windows runner from the tagged source, so what you download is exactly what the repository contains at that tag.
 
 ## What it does
 
@@ -47,6 +63,7 @@ Found by reading the code back after the fact, and recorded here rather than lef
 - **The rotating session key is never used.** `MainForm` derives a new `sessionKey` every 30 seconds and logs its fingerprint to the console, but all vault encryption and decryption uses `masterKey`. The rotation has no effect on security in the current version.
 - **A label is out of date.** `ViewPasswordForm` displays "Clipboard clears in 10s" while the timer is set to 15 seconds. The timer was lengthened after usability testing (recorded in the report) and the label was not updated.
 - **Secrets are held in `string`.** .NET strings are immutable and cannot be securely wiped, so decrypted passwords remain in memory until garbage collection even after `SecureCleanup` clears the on-screen field.
+- **The data files live next to the executable.** `master.dat`, `passwords.dat` and `lockout.dat` are written to the working directory rather than to the user's application data folder, so the app must be run from a writable location, and two copies of the executable in different folders would have two separate vaults. Writing to `%APPDATA%\SecureVault` would fix both.
 - **A `|` character in a username or password corrupts the entry.** Entries are stored as `site | username | password` and split on `|` when read back, so a password containing that character is cut short when viewed. A structured format, or escaping the delimiter, would fix it.
 
 ### Fixed in 3.1
@@ -85,9 +102,9 @@ SecureVault/
 
 Each form has a matching `.Designer.cs` file holding the Visual Studio generated layout code.
 
-## Running it
+## Building it yourself
 
-Windows only, since it is a Windows Forms application. You need the .NET 8 SDK.
+Windows only, since it is a Windows Forms application. You need the .NET 8 SDK. If you just want to use it, see Download above.
 
 With Visual Studio 2022: open `src/SecureVault.sln`, build, and run.
 

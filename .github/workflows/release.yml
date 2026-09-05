@@ -1,0 +1,63 @@
+# Runs when a version tag like v3.1.0 is pushed. Builds two downloadable
+# packages on a Windows runner and attaches them to a GitHub Release:
+#
+#   SecureVault-<tag>-win-x64.zip
+#       Self-contained. Includes the .NET runtime. Unzip and run. Larger.
+#
+#   SecureVault-<tag>-win-x64-framework-dependent.zip
+#       Small. Needs the .NET 8 Desktop Runtime installed on the machine.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish self-contained single file
+        run: >
+          dotnet publish src/SecureVault/SecureVault.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          --output publish/self-contained
+
+      - name: Publish framework-dependent
+        run: >
+          dotnet publish src/SecureVault/SecureVault.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained false
+          -p:PublishSingleFile=true
+          --output publish/framework-dependent
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          Compress-Archive -Path publish/self-contained/*      -DestinationPath "SecureVault-$tag-win-x64.zip"
+          Compress-Archive -Path publish/framework-dependent/* -DestinationPath "SecureVault-$tag-win-x64-framework-dependent.zip"
+          Get-ChildItem *.zip | ForEach-Object { "{0}  {1:N1} MB" -f $_.Name, ($_.Length / 1MB) }
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: SecureVault ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            SecureVault-${{ github.ref_name }}-win-x64.zip
+            SecureVault-${{ github.ref_name }}-win-x64-framework-dependent.zip

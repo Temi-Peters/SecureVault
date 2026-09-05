@@ -1,0 +1,27 @@
+# Builds the project on every push and pull request, on a Windows runner,
+# because Windows Forms only compiles with Windows targeting.
+# Its job is to prove the code compiles, and to give the README a build badge.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore src/SecureVault.sln
+
+      - name: Build
+        run: dotnet build src/SecureVault.sln --configuration Release --no-restore
