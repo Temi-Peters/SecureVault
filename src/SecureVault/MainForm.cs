@@ -19,7 +19,7 @@ namespace SecureVault
         // The master key is the encryption key derived from the master password
         // It is used to encrypt and decrypt all vault entries
         // It never changes while the app is running and is never written to disk
-        private readonly byte[] masterKey;
+        private byte[] masterKey;
         // The session key is a temporary key that rotates every 30 seconds
         // It is used for short-term in-memory operations
         // Rotating it limits how long a stolen key remains useful
@@ -97,7 +97,8 @@ namespace SecureVault
             // Using the current time as salt means each rotation produces a different key
             sessionKey = PasswordUtils.DeriveEncryptionKey(
                 Convert.ToHexString(masterKey),
-                BitConverter.GetBytes(DateTime.UtcNow.Ticks));
+                BitConverter.GetBytes(DateTime.UtcNow.Ticks),
+                PasswordUtils.DefaultIterations);
             // Print the first 8 characters of the new key's fingerprint to the console
             // This is only visible in debug mode and helps confirm rotation is working
             Console.WriteLine($"Session key rotated -> {Fingerprint(sessionKey)}");
@@ -283,8 +284,13 @@ namespace SecureVault
         private void btnChangePassword_Click(object sender, EventArgs e)
         {
             using var changeForm = new ChangePasswordForm();
-            if (changeForm.ShowDialog() == DialogResult.OK)
+            if (changeForm.ShowDialog() == DialogResult.OK && changeForm.NewKey != null)
             {
+                // The entries are already decrypted in memory, so re-encrypting the vault
+                // under the new key is one save. Without this, the vault would be unreadable
+                // at the next login because it would still be encrypted under the old key.
+                masterKey = changeForm.NewKey;
+                SavePasswords();
                 MessageBox.Show("Master password changed successfully.");
             }
         }

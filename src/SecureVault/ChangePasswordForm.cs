@@ -5,6 +5,9 @@ namespace SecureVault
 {
     public partial class ChangePasswordForm : Form
     {
+        // Set on success so the vault can be re-encrypted under the new key
+        public byte[]? NewKey { get; private set; }
+
         public ChangePasswordForm()
         {
             // Set up all the buttons and textboxes from the designer file
@@ -48,7 +51,7 @@ namespace SecureVault
             }
 
             // Try to load the currently stored master password hash from disk
-            if (!PasswordUtils.LoadMasterHash(out byte[] salt, out byte[] storedHash))
+            if (!PasswordUtils.LoadMaster(out byte[] salt, out byte[] storedVerifier, out int iterations, out bool legacy))
             {
                 MessageBox.Show("No existing master password found.");
                 return;
@@ -56,7 +59,7 @@ namespace SecureVault
 
             // Verify the old password is correct before allowing the change
             // This prevents someone changing the password on an unlocked device
-            if (!PasswordUtils.VerifyPassword(oldPass, salt, storedHash))
+            if (PasswordUtils.VerifyAndDeriveKey(oldPass, salt, storedVerifier, iterations, legacy) == null)
             {
                 MessageBox.Show("Old password is incorrect.");
                 return;
@@ -67,9 +70,10 @@ namespace SecureVault
             byte[] newSalt = PasswordUtils.GenerateSalt();
 
             // Hash the new password with the new salt
-            byte[] newHash = PasswordUtils.HashPassword(newPass, newSalt);
+            byte[] newKey = PasswordUtils.DeriveEncryptionKey(newPass, newSalt, PasswordUtils.DefaultIterations);
             // Save the new salt and hash to disk, overwriting the old ones
-            PasswordUtils.SaveMasterHash(newSalt, newHash);
+            PasswordUtils.SaveMaster(newSalt, PasswordUtils.ComputeVerifier(newKey), PasswordUtils.DefaultIterations);
+            NewKey = newKey;
 
             MessageBox.Show("Master password successfully changed.");
 

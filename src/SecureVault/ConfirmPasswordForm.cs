@@ -32,10 +32,10 @@ namespace SecureVault
             }
 
             // Try to load the stored master password hash from disk
-            if (PasswordUtils.LoadMasterHash(out byte[] salt, out byte[] storedHash))
+            if (PasswordUtils.LoadMaster(out byte[] salt, out byte[] storedVerifier, out int iterations, out bool legacy))
             {
                 // Check if the entered password matches the stored hash
-                if (PasswordUtils.VerifyPassword(enteredPassword, salt, storedHash))
+                if (PasswordUtils.VerifyAndDeriveKey(enteredPassword, salt, storedVerifier, iterations, legacy) != null)
                 {
                     // Password is correct so mark as confirmed
                     IsConfirmed = true;

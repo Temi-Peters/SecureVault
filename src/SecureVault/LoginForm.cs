@@ -47,71 +47,53 @@ namespace SecureVault
             }
 
             // These will hold the salt and hash loaded from master.dat
-            byte[] salt;
-            byte[] storedHash;
-
-            // Try to load the stored master password hash from disk
-            // If the file does not exist this is the first time the app has been run
-            if (!PasswordUtils.LoadMasterHash(out salt, out storedHash))
+            if (!PasswordUtils.LoadMaster(out byte[] salt, out byte[] storedVerifier,
+                    out int iterations, out bool legacy))
             {
-                // First run - validate the password meets complexity rules
-                // before storing it, because a weak master password would
-                // undermine all the encryption even if the rest is secure
+                // First run: create the master password
                 if (!SecurityPolicy.ValidatePasswordComplexity(password, out string reason))
                 {
-                    // Tell the user exactly which rule their password broke
                     MessageBox.Show("Password policy: " + reason);
                     return;
                 }
-
-                // Generate a brand new random salt for this master password
-                // The salt ensures two users with the same password get different hashes
                 salt = PasswordUtils.GenerateSalt();
-
-                // Hash the password with the salt using PBKDF2
-                // The hash is what gets stored, never the actual password
-                storedHash = PasswordUtils.HashPassword(password, salt);
-
-                // Save the salt and hash to master.dat on disk
-                PasswordUtils.SaveMasterHash(salt, storedHash);
-
-                // Ask the user to log in again now that the password is set
+                byte[] newKey = PasswordUtils.DeriveEncryptionKey(password, salt, PasswordUtils.DefaultIterations);
+                PasswordUtils.SaveMaster(salt, PasswordUtils.ComputeVerifier(newKey), PasswordUtils.DefaultIterations);
                 MessageBox.Show("Master password created. Please log in again.");
                 txtPassword.Clear();
                 return;
             }
 
-            // Returning user - check if the entered password matches the stored hash
-            // VerifyPassword uses a timing-safe comparison to prevent timing attacks
-            if (!PasswordUtils.VerifyPassword(password, salt, storedHash))
+            byte[]? key = PasswordUtils.VerifyAndDeriveKey(password, salt, storedVerifier, iterations, legacy);
+            if (key == null)
             {
-                // Wrong password - record this failed attempt in the lockout file
                 LockoutManager.RegisterFailedAttempt();
-
-                // Check if this failed attempt has triggered a lockout
                 int nextWait = LockoutManager.GetRemainingLockoutSeconds();
                 if (nextWait > 0)
                 {
-                    // Tell the user how long they need to wait
                     MessageBox.Show($"Incorrect password. Try again in {nextWait} seconds.");
                 }
                 else
                 {
                     MessageBox.Show("Incorrect password.");
                 }
-
-                // Clear the password box so they can try again
                 txtPassword.Clear();
                 return;
             }
-            // Login was successful
-            // Reset the lockout counter since the correct password was entered
+
+            // A version 1 file stored the key itself. Now that the password is proven,
+            // rewrite it in the version 2 layout so the key is no longer on disk.
+            if (legacy)
+            {
+                PasswordUtils.SaveMaster(salt, PasswordUtils.ComputeVerifier(key), iterations);
+            }
+
             LockoutManager.Reset();
 
             // Derive the encryption key from the password and salt
             // This key is used to encrypt and decrypt vault entries
             // It is kept in memory only for the duration of this session
-            DerivedKey = PasswordUtils.DeriveEncryptionKey(password, salt);
+            DerivedKey = key;
 
             // Set the result to OK so Program.cs knows login succeeded
             DialogResult = DialogResult.OK;

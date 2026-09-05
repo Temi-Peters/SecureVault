@@ -31,26 +31,32 @@ The design followed research comparing this approach against existing tools (Kee
 
 The security-relevant choices:
 
-- **Master password hashing and key derivation: PBKDF2 with HMAC-SHA256 at 100,000 iterations.** The master password is never stored. What is stored, in `master.dat`, is a random 16-byte salt and a 32-byte value used to verify login. The AES key for the vault is derived from the same password and salt by the same computation, which is the first limitation below.
+- **Master password hashing and key derivation: PBKDF2 with HMAC-SHA256, 100,000 iterations by default.** The master password is never stored. `master.dat` holds a random 16-byte salt, the iteration count, and a verifier, which is the SHA-256 of the derived AES key rather than the key itself. Reading the file gives an attacker the verifier, not the key, so recovering the key still means guessing the password through PBKDF2. Because the count is stored, it can be raised for new vaults without breaking old ones.
 - **AES-256 for each stored entry, individually.** Every entry is encrypted on its own with a freshly generated initialisation vector, rather than encrypting the whole vault as one block. Identical passwords stored for two different sites do not produce identical ciphertext, and a corrupted entry does not take the others with it.
-- **A hand-written constant-time comparison for password verification.** `PasswordUtils.FixedTimeEquals` compares every byte regardless of where a mismatch occurs, so the time taken does not leak how close a guess was. It was written when the project was on .NET Framework 4.7.2, which has no built-in equivalent, and kept after the move to .NET 8 (see limitations).
+- **Constant-time comparison for password verification**, using `CryptographicOperations.FixedTimeEquals`, so the time taken to reject a wrong password does not leak how close it was. Earlier versions carried a hand-written equivalent from before the move to .NET 8.
 - **Exponential backoff on failed logins**, handled by `LockoutManager`: 5 seconds after the first failure, doubling each time, capped at 300 seconds. The failure count and timestamp are written to `lockout.dat`, so closing and reopening the application does not reset the wait.
 - **A minimum password policy** in `SecurityPolicy`: at least 10 characters, at least one uppercase letter, one lowercase letter, one digit and one symbol, and a block on a few obviously common substrings. Enforced on the initial master password and on any later change.
+- **Master password changes re-encrypt the vault.** Because entries are already decrypted in memory, `MainForm` re-saves the vault under the new key in the same operation, so nothing is orphaned under the old one.
 - **Re-authentication before reveal.** Viewing a stored entry opens `ConfirmPasswordForm` first, which verifies the master password against the stored hash before `ViewPasswordForm` is shown.
 - **Clipboard and screen hygiene** in `ViewPasswordForm`: the password field is read-only with keyboard shortcuts disabled, reveals are time-limited, the field re-masks on focus loss, and the clipboard is cleared on a timer.
 
 ## Known limitations
 
-Found by reading the code back after the fact, and recorded here rather than left to be discovered. The first one is serious.
+Found by reading the code back after the fact, and recorded here rather than left to be discovered.
 
-- **The login verifier stored on disk is the vault encryption key.** `HashPassword` (whose output is written to `master.dat`) and `DeriveEncryptionKey` (whose output is the AES key) run the identical PBKDF2 computation with identical inputs, so they produce identical bytes. Anyone who obtains `master.dat` together with `passwords.dat` can decrypt the vault directly, without guessing the master password at all. The 100,000 iterations only slow an attacker who has `passwords.dat` but not `master.dat`, and the two files are created side by side. The fix is to store a hash of the derived key (for example its SHA-256) as the verifier rather than the key itself, so that recovering the key from `master.dat` still requires guessing the password through PBKDF2. This changes the file format, so existing vaults would need migrating.
-- **Changing the master password does not re-encrypt existing entries.** `ChangePasswordForm` re-hashes the new password and saves a new salt, but never touches `passwords.dat`. Entries saved before a master password change will not decrypt after one. The fix is to decrypt everything under the old key before the change and re-encrypt under the new one.
-- **The PBKDF2 iteration count is not stored with the hash.** `master.dat` holds only the salt and the hash. The count exists as a default parameter in the code, so it can never be raised without breaking every existing vault. Storing the count alongside the salt is the standard fix, and would also allow old vaults to be upgraded on their next successful login. OWASP currently recommends 600,000 iterations for PBKDF2-HMAC-SHA256, six times the figure used here.
 - **The rotating session key is never used.** `MainForm` derives a new `sessionKey` every 30 seconds and logs its fingerprint to the console, but all vault encryption and decryption uses `masterKey`. The rotation has no effect on security in the current version.
-- **The hand-written constant-time comparison is now redundant.** .NET 8 provides `CryptographicOperations.FixedTimeEquals`, which should be used in preference to the local implementation.
 - **A label is out of date.** `ViewPasswordForm` displays "Clipboard clears in 10s" while the timer is set to 15 seconds. The timer was lengthened after usability testing (recorded in the report) and the label was not updated.
 - **Secrets are held in `string`.** .NET strings are immutable and cannot be securely wiped, so decrypted passwords remain in memory until garbage collection even after `SecureCleanup` clears the on-screen field.
 - **A `|` character in a username or password corrupts the entry.** Entries are stored as `site | username | password` and split on `|` when read back, so a password containing that character is cut short when viewed. A structured format, or escaping the delimiter, would fix it.
+
+### Fixed in 3.1
+
+These were found in the same review and fixed in the commit after Version 3. They are kept here because they are the more instructive part of the project's history.
+
+- **The login verifier stored on disk was the vault encryption key.** `HashPassword` and `DeriveEncryptionKey` ran the identical PBKDF2 computation, so the 32 bytes written to `master.dat` were the AES key, and anyone holding both files could decrypt the vault with no guessing. Fixed by storing SHA-256 of the key as the verifier. Existing vaults are migrated to the new layout automatically on their next successful login.
+- **Changing the master password orphaned the vault.** A new salt and verifier were written but `passwords.dat` stayed encrypted under the old key. Fixed by re-encrypting the in-memory entries under the new key as part of the change.
+- **The PBKDF2 iteration count was not stored**, so it could never be raised. It is now written to `master.dat` and read back at login.
+- **The hand-written constant-time comparison** was replaced with `CryptographicOperations.FixedTimeEquals`.
 
 ## Project structure
 
@@ -72,7 +78,7 @@ SecureVault/
         ├── ViewPasswordForm.cs            masked display, timed reveal, clipboard copy and clear
         ├── ConfirmPasswordForm.cs         re-authentication before a reveal
         ├── ChangePasswordForm.cs          master password change
-        ├── PasswordUtils.cs               PBKDF2, AES-256, constant-time compare, master.dat I/O
+        ├── PasswordUtils.cs               PBKDF2, verifier, AES-256, master.dat I/O
         ├── LockoutManager.cs              exponential backoff, persisted in lockout.dat
         └── SecurityPolicy.cs              password complexity rules
 ```
@@ -103,8 +109,9 @@ Built and tested in three stages, each adding to the last:
 - **Version 1 (Beta):** the core login and entry flow, on .NET Framework 4.7.2.
 - **Version 2:** master password change, plus the move to PBKDF2 and AES-256 in place of earlier, simpler storage. The constant-time comparison was hand-written at this stage because the framework did not provide one.
 - **Version 3:** delete entry, a dedicated view window with timed reveal and clipboard clearing, URL validation on the site field, and the dark theme. Moved to .NET 8.
+- **Version 3.1:** security fixes from a code review of Version 3, listed above. The `master.dat` format changed, with automatic migration.
 
-The repository's first commit was Version 2. Version 3 was reconstructed from the source listing in the coursework report's appendix and committed on top, which is why the history is two commits rather than a running log.
+The repository's first commit was Version 2. Version 3 was reconstructed from the source listing in the coursework report's appendix and committed on top, and 3.1 followed as a separate commit, which is why the history is three commits rather than a running log.
 
 The full iterative testing record, including issues found and fixed along the way, is in the report.
 

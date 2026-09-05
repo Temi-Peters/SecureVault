@@ -35,145 +35,116 @@ namespace SecureVault
         }
 
         // =========================
-        // HASHING
+        // KEY DERIVATION AND VERIFIER
         // =========================
 
-        // Hashes a password using PBKDF2 with SHA256
-        // PBKDF2 is a key derivation function designed specifically
-        // for password hashing because it is deliberately slow
-        // making brute force attacks much harder
-        public static byte[] HashPassword(string password, byte[] salt,
-            int iterations = 100000, int size = 32)
+        // The number of PBKDF2 rounds used for new vaults. Stored in master.dat,
+        // so it can be raised later without breaking vaults created at a lower count.
+        public const int DefaultIterations = 100_000;
+
+        // First field of a version 2 master.dat. Chosen negative so it can never be
+        // mistaken for the salt length that begins the old, version 1 format.
+        private const int FormatVersion = -2;
+
+        // Turns the master password into the 32-byte AES key using PBKDF2-HMAC-SHA256.
+        // This is the only place the password is ever converted into key material.
+        public static byte[] DeriveEncryptionKey(string password, byte[] salt, int iterations, int size = 32)
         {
-            // Rfc2898DeriveBytes is the .NET implementation of PBKDF2
-            // 100,000 iterations means an attacker must run 100,000
-            // SHA256 operations for every single password guess
-            using (var pbkdf2 = new Rfc2898DeriveBytes(
-                password, salt, iterations, HashAlgorithmName.SHA256))
+            using (var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256))
             {
-                // Returns a 32 byte derived key
-                // The actual password is never stored, only this derived value
                 return pbkdf2.GetBytes(size);
             }
         }
 
-        // =========================
-        // SAVE MASTER HASH
-        // =========================
-
-        // Saves the salt and hash to master.dat on disk
-        // The format is: salt length, salt bytes, hash length, hash bytes
-        // Writing the length before each field means the reader always knows
-        // exactly how many bytes to read for each part
-        public static void SaveMasterHash(byte[] salt, byte[] hash)
+        // The value written to disk to check a login. It is a SHA-256 of the key,
+        // never the key itself, so reading master.dat does not hand over the vault key.
+        // Recovering the key from the verifier still means guessing the password through PBKDF2.
+        public static byte[] ComputeVerifier(byte[] key)
         {
-            if (salt == null || hash == null)
-                throw new ArgumentNullException("Salt or hash cannot be null.");
+            return SHA256.HashData(key);
+        }
 
-            // FileShare.None prevents any other process from reading or
-            // writing the file while we are writing to it
-            using (var fs = new FileStream(MasterFile, FileMode.Create,
-                FileAccess.Write, FileShare.None))
-                using (var bw = new BinaryWriter(fs))
+        // =========================
+        // SAVE MASTER FILE (version 2)
+        // =========================
+        // Layout: int32 -2 | int32 iterations | int32 salt length | salt | int32 verifier length | verifier
+        public static void SaveMaster(byte[] salt, byte[] verifier, int iterations)
+        {
+            if (salt == null || verifier == null)
+                throw new ArgumentNullException("Salt or verifier cannot be null.");
+
+            using (var fs = new FileStream(MasterFile, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var bw = new BinaryWriter(fs))
             {
-                // Write the length of the salt first so the reader
-                // knows how many bytes to read for the salt
+                bw.Write(FormatVersion);
+                bw.Write(iterations);
                 bw.Write(salt.Length);
                 bw.Write(salt);
-
-                // Write the length of the hash first so the reader
-                // knows how many bytes to read for the hash
-                bw.Write(hash.Length);
-                bw.Write(hash);
-
-                // Flush forces all buffered data to be written to disk immediately
+                bw.Write(verifier.Length);
+                bw.Write(verifier);
                 bw.Flush();
             }
         }
 
         // =========================
-        // LOAD MASTER HASH
+        // LOAD MASTER FILE (versions 1 and 2)
         // =========================
-
-        // Reads the salt and hash back from master.dat
-        // Returns true if successful, false if the file does not exist
-        // or if anything goes wrong reading it
-        // The out parameters are set to the loaded values on success
-        public static bool LoadMasterHash(out byte[] salt, out byte[] hash)
+        // Version 1 files (salt length | salt | hash length | hash) are still read.
+        // For those, "verifier" holds the old stored value, which was the key itself,
+        // and legacy is set to true so the caller can migrate the file on the next successful login.
+        public static bool LoadMaster(out byte[] salt, out byte[] verifier, out int iterations, out bool legacy)
         {
-            salt = null;
-            hash = null;
+            salt = null!;
+            verifier = null!;
+            iterations = DefaultIterations;
+            legacy = false;
 
-            // If master.dat does not exist this is the first run
-            // Return false to signal that no master password has been set yet
             if (!File.Exists(MasterFile))
                 return false;
 
             try
             {
-                using (var fs = new FileStream(MasterFile, FileMode.Open,
-                    FileAccess.Read, FileShare.Read))
-                    using (var br = new BinaryReader(fs))
+                using (var fs = new FileStream(MasterFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var br = new BinaryReader(fs))
                 {
-                    // Check there are at least 8 bytes in the file
-                    // 4 bytes for salt length + 4 bytes for hash length minimum
-                    // If not the file is empty or corrupted
                     if (fs.Length < 8)
                         return false;
 
-                    // Read the salt length prefix
-                    int saltLen = br.ReadInt32();
+                    int first = br.ReadInt32();
+                    if (first == FormatVersion)
+                    {
+                        iterations = br.ReadInt32();
+                        if (iterations <= 0)
+                            return false;
+                        first = br.ReadInt32();
+                    }
+                    else
+                    {
+                        legacy = true;
+                    }
 
-                    // Validate the salt length is sensible before reading
-                    if (saltLen < 0 || saltLen > fs.Length - fs.Position)
+                    int saltLen = first;
+                    if (saltLen <= 0 || saltLen > fs.Length - fs.Position)
                         return false;
-
-                    // Read exactly as many bytes as the salt length says
                     salt = br.ReadBytes(saltLen);
-                    // If we got fewer bytes than expected the file is truncated
                     if (salt.Length != saltLen)
                         return false;
 
-                    // Check there are still at least 4 bytes left for the hash length
                     if (fs.Position + 4 > fs.Length)
                         return false;
-
-                    // Read the hash length prefix
-                    int hashLen = br.ReadInt32();
-
-                    // Validate the hash length before reading
-                    if (hashLen < 0 || hashLen > fs.Length - fs.Position)
+                    int verLen = br.ReadInt32();
+                    if (verLen <= 0 || verLen > fs.Length - fs.Position)
                         return false;
-
-                    // Read exactly as many bytes as the hash length says
-                    hash = br.ReadBytes(hashLen);
-
-                    // If we got fewer bytes than expected the file is truncated
-                    if (hash.Length != hashLen)
+                    verifier = br.ReadBytes(verLen);
+                    if (verifier.Length != verLen)
                         return false;
                 }
-
                 return true;
-            }
-            catch (EndOfStreamException)
-            {
-                // File ended before we finished reading
-                salt = null;
-                hash = null;
-                return false;
-            }
-            catch (IOException)
-            {
-                // Something went wrong accessing the file
-                salt = null;
-                hash = null;
-                return false;
             }
             catch (Exception)
             {
-                // Catch any other unexpected errors
-                salt = null;
-                hash = null;
+                salt = null!;
+                verifier = null!;
                 return false;
             }
         }
@@ -181,53 +152,20 @@ namespace SecureVault
         // =========================
         // VERIFY PASSWORD
         // =========================
-
-        // Compares two byte arrays in a way that always takes the same amount of time
-        // regardless of where the first difference is found
-        // A normal comparison stops as soon as it finds a mismatch which leaks
-        // information about how close a guess is through the response time
-        // This method prevents that timing attack
         private static bool FixedTimeEquals(byte[] a, byte[] b)
         {
-            if (a == null || b == null || a.Length != b.Length) return false;
-
-            int diff = 0;
-
-            // XOR each pair of bytes together and OR the result into diff
-            // If any bytes differ then diff will end up non-zero
-            // Crucially the loop always runs all the way through
-            // so it always takes the same amount of time
-            for (int i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
-
-            // If diff is still zero every byte matched
-            return diff == 0;
+            return CryptographicOperations.FixedTimeEquals(a, b);
         }
 
-        // Checks whether an entered password matches the stored hash
-        // Hashes the entered password with the stored salt and compares
-        // using the timing safe FixedTimeEquals method
-        public static bool VerifyPassword(string password, byte[] salt,
-            byte[] storedHash)
+        // Derives the key from the typed password and checks it against what is on disk.
+        // Returns the key on success so the caller does not run PBKDF2 a second time,
+        // or null if the password is wrong.
+        public static byte[]? VerifyAndDeriveKey(string password, byte[] salt, byte[] storedVerifier,
+            int iterations, bool legacy)
         {
-            byte[] hash = HashPassword(password, salt);
-            return FixedTimeEquals(hash, storedHash);
-        }
-        // =========================
-        // DERIVE ENCRYPTION KEY
-        // =========================
-
-        // Derives a separate AES encryption key from the master password
-        // This key is used to encrypt and decrypt vault entries
-        // It is stored in memory only for the duration of the session
-        // and is never written to disk
-        public static byte[] DeriveEncryptionKey(string password,
-            byte[] salt, int size = 32)
-        {
-            using (var pbkdf2 = new Rfc2898DeriveBytes(
-                password, salt, 100000, HashAlgorithmName.SHA256))
-            {
-                return pbkdf2.GetBytes(size);
-            }
+            byte[] key = DeriveEncryptionKey(password, salt, iterations);
+            byte[] candidate = legacy ? key : ComputeVerifier(key);
+            return FixedTimeEquals(candidate, storedVerifier) ? key : null;
         }
 
         // =========================
