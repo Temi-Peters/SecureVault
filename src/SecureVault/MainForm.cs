@@ -20,17 +20,11 @@ namespace SecureVault
         // It is used to encrypt and decrypt all vault entries
         // It never changes while the app is running and is never written to disk
         private byte[] masterKey;
-        // The session key is a temporary key that rotates every 30 seconds
-        // It is used for short-term in-memory operations
-        // Rotating it limits how long a stolen key remains useful
-        private byte[] sessionKey;
         // The name of the file where encrypted passwords are stored on disk
         private readonly string passwordFile = "passwords.dat";
         // This list holds all the decrypted password entries in memory
         // while the app is running
         private readonly List<string> passwordEntries = new();
-        // This timer fires every 30 seconds to rotate the session key
-        private readonly Timer rotationTimer;
         // This timer fires 15 seconds after a password is copied
         // to clear it from the clipboard automatically
         private readonly Timer clipboardClearTimer;
@@ -43,17 +37,10 @@ namespace SecureVault
             InitializeComponent();
             // Store the master key passed in from the login form
             masterKey = key;
-            // Start with the session key equal to the master key
-            sessionKey = key;
             // Set the title bar text of the window
             Text = "Password Manager";
             // Load any previously saved password entries from disk
             LoadPasswords();
-            // Set up the session key rotation timer
-            // Interval is in milliseconds so 30000 = 30 seconds
-            rotationTimer = new Timer { Interval = 30_000 };
-            rotationTimer.Tick += RotateSessionKey;
-            rotationTimer.Start();
             // Set up the clipboard clear timer
             // It does not start automatically, only when a password is copied
             clipboardClearTimer = new Timer();
@@ -89,27 +76,6 @@ namespace SecureVault
                 lastClipboardSecret = null;
                 clipboardClearTimer.Stop();
             }
-        }
-        // This method runs every 30 seconds to rotate the session key
-        private void RotateSessionKey(object? sender, EventArgs e)
-        {
-            // Derive a new session key using the master key and the current time
-            // Using the current time as salt means each rotation produces a different key
-            sessionKey = PasswordUtils.DeriveEncryptionKey(
-                Convert.ToHexString(masterKey),
-                BitConverter.GetBytes(DateTime.UtcNow.Ticks),
-                PasswordUtils.DefaultIterations);
-            // Print the first 8 characters of the new key's fingerprint to the console
-            // This is only visible in debug mode and helps confirm rotation is working
-            Console.WriteLine($"Session key rotated -> {Fingerprint(sessionKey)}");
-        }
-        // Creates a short readable fingerprint of a key for debug logging
-        // Takes the first 8 characters of the key's SHA256 hash in hex format
-        private static string Fingerprint(byte[] key)
-        {
-            return Convert.ToHexString(
-                System.Security.Cryptography.SHA256.HashData(key)
-                ).Substring(0, 8);
         }
         // Checks whether a site string looks like a valid URL
         // Returns true if it matches the URL pattern, false otherwise

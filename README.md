@@ -60,7 +60,6 @@ The security-relevant choices:
 
 Found by reading the code back after the fact, and recorded here rather than left to be discovered.
 
-- **The rotating session key is never used.** `MainForm` derives a new `sessionKey` every 30 seconds and logs its fingerprint to the console, but all vault encryption and decryption uses `masterKey`. The rotation has no effect on security in the current version.
 - **A label is out of date.** `ViewPasswordForm` displays "Clipboard clears in 10s" while the timer is set to 15 seconds. The timer was lengthened after usability testing (recorded in the report) and the label was not updated.
 - **Secrets are held in `string`.** .NET strings are immutable and cannot be securely wiped, so decrypted passwords remain in memory until garbage collection even after `SecureCleanup` clears the on-screen field.
 - **The data files live next to the executable.** `master.dat`, `passwords.dat` and `lockout.dat` are written to the working directory rather than to the user's application data folder, so the app must be run from a writable location, and two copies of the executable in different folders would have two separate vaults. Writing to `%APPDATA%\SecureVault` would fix both.
@@ -74,6 +73,10 @@ These were found in the same review and fixed in the commit after Version 3. The
 - **Changing the master password orphaned the vault.** A new salt and verifier were written but `passwords.dat` stayed encrypted under the old key. Fixed by re-encrypting the in-memory entries under the new key as part of the change.
 - **The PBKDF2 iteration count was not stored**, so it could never be raised. It is now written to `master.dat` and read back at login.
 - **The hand-written constant-time comparison** was replaced with `CryptographicOperations.FixedTimeEquals`.
+
+### Fixed in 3.1.1
+
+- **The unused session key rotation froze the interface.** `MainForm` ran a `System.Windows.Forms.Timer` every 30 seconds whose handler performed a full PBKDF2 derivation at 100,000 iterations. That timer fires on the UI thread, so the window stopped repainting and stopped accepting input for the duration of every derivation. On Windows the pause was short enough to read as a stutter; on slower or emulated runtimes it presented as the application hanging about half a minute after the vault opened. The derived key was never used for anything, so the timer, the handler and the unused `sessionKey` field were removed outright. Any future rotation must run off the UI thread and have a purpose.
 
 ## Project structure
 
@@ -127,6 +130,7 @@ Built and tested in three stages, each adding to the last:
 - **Version 2:** master password change, plus the move to PBKDF2 and AES-256 in place of earlier, simpler storage. The constant-time comparison was hand-written at this stage because the framework did not provide one.
 - **Version 3:** delete entry, a dedicated view window with timed reveal and clipboard clearing, URL validation on the site field, and the dark theme. Moved to .NET 8.
 - **Version 3.1:** security fixes from a code review of Version 3, listed above. The `master.dat` format changed, with automatic migration.
+- **Version 3.1.1:** removed the unused session key rotation, which was blocking the UI thread every 30 seconds.
 
 The repository's first commit was Version 2. Version 3 was reconstructed from the source listing in the coursework report's appendix and committed on top, and 3.1 followed as a separate commit, which is why the history is three commits rather than a running log.
 
