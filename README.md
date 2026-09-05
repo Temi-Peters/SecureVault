@@ -16,7 +16,7 @@ Windows 10 or 11, 64-bit. Grab the latest build from the [Releases page](https:/
 Two things to know before running it:
 
 - **Windows SmartScreen will warn you.** The executable is not code-signed, because signing certificates cost money and this is a coursework project. Click "More info", then "Run anyway". The source is all here if you would rather build it yourself.
-- **Unzip it somewhere you can write to**, such as your Documents folder. The vault files are created next to the executable, so it will not work correctly from a read-only location like `Program Files`.
+- **Your vault lives in `%LOCALAPPDATA%\SecureVault`** (normally `C:\Users\<you>\AppData\Local\SecureVault`), not next to the executable. That means the executable can sit anywhere, including a read-only folder, and moving or replacing it does not lose your passwords. Back up that folder if you care about what is in it. If you used 3.1.1 or earlier, the vault files it left next to the executable are moved into that folder the first time 3.1.2 starts.
 
 Releases are built automatically by GitHub Actions on a Windows runner from the tagged source, so what you download is exactly what the repository contains at that tag.
 
@@ -60,9 +60,7 @@ The security-relevant choices:
 
 Found by reading the code back after the fact, and recorded here rather than left to be discovered.
 
-- **A label is out of date.** `ViewPasswordForm` displays "Clipboard clears in 10s" while the timer is set to 15 seconds. The timer was lengthened after usability testing (recorded in the report) and the label was not updated.
 - **Secrets are held in `string`.** .NET strings are immutable and cannot be securely wiped, so decrypted passwords remain in memory until garbage collection even after `SecureCleanup` clears the on-screen field.
-- **The data files live next to the executable.** `master.dat`, `passwords.dat` and `lockout.dat` are written to the working directory rather than to the user's application data folder, so the app must be run from a writable location, and two copies of the executable in different folders would have two separate vaults. Writing to `%APPDATA%\SecureVault` would fix both.
 - **A `|` character in a username or password corrupts the entry.** Entries are stored as `site | username | password` and split on `|` when read back, so a password containing that character is cut short when viewed. A structured format, or escaping the delimiter, would fix it.
 
 ### Fixed in 3.1
@@ -78,6 +76,13 @@ These were found in the same review and fixed in the commit after Version 3. The
 
 - **The unused session key rotation froze the interface.** `MainForm` ran a `System.Windows.Forms.Timer` every 30 seconds whose handler performed a full PBKDF2 derivation at 100,000 iterations. That timer fires on the UI thread, so the window stopped repainting and stopped accepting input for the duration of every derivation. On Windows the pause was short enough to read as a stutter; on slower or emulated runtimes it presented as the application hanging about half a minute after the vault opened. The derived key was never used for anything, so the timer, the handler and the unused `sessionKey` field were removed outright. Any future rotation must run off the UI thread and have a purpose.
 
+### Fixed in 3.1.2
+
+- **The data files were written to whatever folder the process started in.** `master.dat`, `passwords.dat` and `lockout.dat` were opened by bare file name, which resolves against the working directory, not the executable's folder. Launched from a terminal that was the folder you were standing in. Launched by double-clicking, it could be a folder the user cannot write to, so the first save failed and the application looked as if it had hung. It also meant two copies of the executable in different folders had two different vaults. The three files now live in `%LOCALAPPDATA%\SecureVault`, chosen through a single `DataPaths` class, and `Program` creates that folder before any form opens. A vault left next to the executable by an earlier version is moved in on first start.
+- **The `.pdb` debug symbols shipped in the release zip.** Release builds now set `DebugType` to `none`, so a download is the executable alone.
+- **The clipboard label said 10 seconds while the timer ran for 15.** Both now read from one `ClipboardClearSeconds` constant in `ViewPasswordForm`, so they cannot drift apart again.
+- **Two windows were titled with their class names.** The view and confirm windows showed "ViewPasswordForm" and "ConfirmPasswordForm" in their title bars. They now read "View Entry" and "Confirm Master Password".
+
 ## Project structure
 
 ```
@@ -92,7 +97,8 @@ SecureVault/
     ├── SecureVault.sln
     └── SecureVault/
         ├── SecureVault.csproj             .NET 8, Windows Forms
-        ├── Program.cs                     entry point: login first, then the vault
+        ├── Program.cs                     entry point: data folder, then login, then the vault
+        ├── DataPaths.cs                   where the three vault files live, plus first-run migration
         ├── LoginForm.cs                   master password creation and verification
         ├── MainForm.cs                    add, view and delete entries; vault file I/O
         ├── ViewPasswordForm.cs            masked display, timed reveal, clipboard copy and clear
@@ -120,7 +126,7 @@ dotnet run
 
 On first launch, entering a master password that meets the policy creates the vault. On later launches, the same password unlocks it.
 
-The three data files (`master.dat`, `passwords.dat`, `lockout.dat`) are created in the working directory at runtime and are not part of the repository, since they hold whichever passwords the person running it chooses to store.
+The three data files (`master.dat`, `passwords.dat`, `lockout.dat`) are created in `%LOCALAPPDATA%\SecureVault` at runtime and are not part of the repository, since they hold whichever passwords the person running it chooses to store. A debug build and a downloaded release share that folder, so they share a vault.
 
 ## Development history
 
@@ -131,6 +137,7 @@ Built and tested in three stages, each adding to the last:
 - **Version 3:** delete entry, a dedicated view window with timed reveal and clipboard clearing, URL validation on the site field, and the dark theme. Moved to .NET 8.
 - **Version 3.1:** security fixes from a code review of Version 3, listed above. The `master.dat` format changed, with automatic migration.
 - **Version 3.1.1:** removed the unused session key rotation, which was blocking the UI thread every 30 seconds.
+- **Version 3.1.2:** vault files moved to the user's local application data folder so the app runs from anywhere, debug symbols dropped from releases, clipboard label and two window titles corrected.
 
 The repository's first commit was Version 2. Version 3 was reconstructed from the source listing in the coursework report's appendix and committed on top, and 3.1 followed as a separate commit, which is why the history is three commits rather than a running log.
 

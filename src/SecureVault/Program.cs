@@ -15,6 +15,22 @@ namespace SecureVault
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
+            // Make sure the folder the vault files live in exists before any
+            // form tries to read or write them. If that fails there is no
+            // point going further, so say why and stop.
+            try
+            {
+                DataPaths.Initialise();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "SecureVault could not set up its data folder:\n" +
+                    DataPaths.DataDirectory + "\n\n" + ex.Message,
+                    "SecureVault", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
             // Show the login screen first before anything else
             // The using keyword ensures the form is removed from memory
             // properly once it is no longer needed

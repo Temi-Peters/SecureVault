@@ -11,7 +11,13 @@
     <Product>SecureVault</Product>
     <Authors>Temidayo Peters</Authors>
     <Description>Local, offline password manager. A-Level Computer Science coursework.</Description>
-    <Version>3.1.1</Version>
+    <Version>3.1.2</Version>
+  </PropertyGroup>
+
+  <!-- Release builds ship without a .pdb, so a download is the executable alone -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
 </Project>

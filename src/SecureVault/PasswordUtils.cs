@@ -7,9 +7,9 @@ namespace SecureVault
 {
     public static class PasswordUtils
     {
-        // The name of the file where the master password hash is stored
-        // Stored as a constant so it only needs to be changed in one place
-        private const string MasterFile = "master.dat";
+        // The full path of the file where the master password verifier is stored.
+        // DataPaths decides the folder, so it only needs to be changed in one place.
+        private static string MasterFile => DataPaths.MasterFile;
 
         // =========================
         // SALT GENERATION

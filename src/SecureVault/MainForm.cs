@@ -20,8 +20,8 @@ namespace SecureVault
         // It is used to encrypt and decrypt all vault entries
         // It never changes while the app is running and is never written to disk
         private byte[] masterKey;
-        // The name of the file where encrypted passwords are stored on disk
-        private readonly string passwordFile = "passwords.dat";
+        // The full path of the file where encrypted passwords are stored on disk
+        private readonly string passwordFile = DataPaths.PasswordFile;
         // This list holds all the decrypted password entries in memory
         // while the app is running
         private readonly List<string> passwordEntries = new();

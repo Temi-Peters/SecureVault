@@ -86,7 +86,7 @@ namespace SecureVault
             Controls.Add(label1);
             Margin = new Padding(4, 3, 4, 3);
             Name = "ConfirmPasswordForm";
-            Text = "ConfirmPasswordForm";
+            Text = "Confirm Master Password";
 
             // Resume the layout engine now everything is configured
             ResumeLayout(false);

@@ -14,7 +14,12 @@ namespace SecureVault
         // The actual password stored here in memory only
         // It is never written to disk from this form
         private readonly string password;
-        // Timer that automatically clears the clipboard 15 seconds
+        // How long a copied password stays on the clipboard before it is
+        // cleared. One constant drives both the timer and the on-screen label,
+        // so the two can no longer disagree.
+        private const int ClipboardClearSeconds = 15;
+
+        // Timer that automatically clears the clipboard ClipboardClearSeconds
         // after the password is copied
         private Timer clipboardTimer;
 
@@ -52,12 +57,12 @@ namespace SecureVault
             this.password = password;
 
             // Show a message in the security label at the bottom
-            lblSecurityStatus.Text = "Clipboard clears in 10s";
+            lblSecurityStatus.Text = $"Clipboard clears in {ClipboardClearSeconds}s";
 
             // Set up the clipboard clear timer
             // It does not start until the user copies a password
             clipboardTimer = new Timer();
-            clipboardTimer.Interval = 15_000; // 15 seconds
+            clipboardTimer.Interval = ClipboardClearSeconds * 1000;
             clipboardTimer.Tick += ClipboardTimer_Tick;
 
             // Set up the reveal timer

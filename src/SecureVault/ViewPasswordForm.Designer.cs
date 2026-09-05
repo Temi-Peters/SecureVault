@@ -161,7 +161,7 @@ namespace SecureVault
             Controls.Add(lblUsernameTitle);
             Controls.Add(lblSiteTitle);
             Name = "ViewPasswordForm";
-            Text = "ViewPasswordForm";
+            Text = "View Entry";
 
             // Resume the layout engine now everything is configured
             ResumeLayout(false);

@@ -20,7 +20,7 @@ namespace SecureVault
         // The name of the file where lockout state is saved on disk
         // Saving to disk means the lockout survives the app being closed and reopened
         // Without this an attacker could simply restart the app to bypass the lockout
-        private const string LockoutFile = "lockout.dat";
+        private static string LockoutFile => DataPaths.LockoutFile;
 
         // How many seconds to wait after the first failed attempt
         private const int BaseDelaySeconds = 5;
